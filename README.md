@@ -276,7 +276,7 @@ classDiagram
 | `début` | LocalDateTime |
 | `fin` | LocalDateTime |
 
-## Diagramme de Classes - Identity & Access
+## Diagramme de Classes - Medical Directory
 
 ```mermaid
   classDiagram
@@ -380,7 +380,7 @@ classDiagram
 | `dateHeure` | LocalDateTime |
 | `adresseCabinet` | String |
 
-## Diagramme de Classes - Identity & Access
+## Diagramme de Classes - Appointment
 ```mermaid
   classDiagram
     direction BT
@@ -456,7 +456,7 @@ classDiagram
 | `formatMime` | String (ex : `application/pdf`) |
 | `checksum` | String (SHA-256) |
 
-## Diagramme de Classes - Identity & Access
+## Diagramme de Classes - Health Record
 ```mermaid
   classDiagram
     %% Définition des énumérations (Tables séparées)
