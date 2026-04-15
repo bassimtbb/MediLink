@@ -9,7 +9,6 @@
 1. [Étape 1 — Liste brute des fonctionnalités](#étape-1--liste-brute-des-fonctionnalités)
 2. [Étape 2 — Regroupement par domaine métier (DDD)](#étape-2--regroupement-par-domaine-métier-ddd)
 3. [Étape 3 — Entités métier par module](#étape-3--entités-métier-par-module)
-4. [Résumé de conception — Checklist en 4 questions](#résumé-de-conception--checklist-en-4-questions)
 
 ---
 
