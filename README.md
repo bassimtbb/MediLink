@@ -1,4 +1,4 @@
-# MediLink - Workflow de Conception
+# MediLink — Workflow de Conception
 
 > **Projet :** MediLink — Application de mise en relation entre patients et médecins pour la prise de rendez-vous en ligne, la gestion des créneaux et le partage sécurisé de documents médicaux.
 
@@ -9,6 +9,7 @@
 1. [Étape 1 — Liste brute des fonctionnalités](#étape-1--liste-brute-des-fonctionnalités)
 2. [Étape 2 — Regroupement par domaine métier (DDD)](#étape-2--regroupement-par-domaine-métier-ddd)
 3. [Étape 3 — Entités métier par module](#étape-3--entités-métier-par-module)
+4. [Résumé de conception — Checklist en 4 questions](#résumé-de-conception--checklist-en-4-questions)
 
 ---
 
@@ -19,11 +20,11 @@
 ### 👤 Patient
 
 - Créer un compte
-- Se connecter
-- Modifier son profil
+- Se connecter / Se déconnecter
+- Modifier son profil (nom, prénom, date de naissance, téléphone)
 - Rechercher un médecin par spécialité, ville ou nom
-- Consulter les créneaux disponibles
-- Prendre rendez-vous
+- Consulter les créneaux disponibles d'un médecin
+- Prendre un rendez-vous
 - Annuler ou déplacer un rendez-vous
 - Recevoir des rappels par notification ou email
 - Consulter l'historique des rendez-vous
@@ -31,27 +32,28 @@
 - Consulter des ordonnances ou comptes rendus
 - Laisser un avis sur le praticien
 
-### 🏪 Médecin
+### 🩺 Médecin
 
-- Créer un compte professionnel
+- Créer un compte professionnel (avec numéro RPPS)
 - Renseigner sa spécialité
 - Définir ses horaires de consultation
 - Ouvrir ou fermer des créneaux
-- Consulter son agenda
-- Accepter ou refuser certaines demandes
-- Consulter le dossier administratif du patient
+- Consulter son agenda du jour
+- Accepter ou refuser certaines demandes de rendez-vous
+- Consulter le dossier administratif du patient (lors du rendez-vous)
 - Déposer une ordonnance
 - Déposer un compte rendu
-- Suivre l'historique des rendez-vous
+- Suivre l'historique de ses rendez-vous
+- Répondre aux avis patients
 
-### 🛡️ Perspective Administrateur Système
+### 🛡️ Administrateur Système
 
-- Gérer les comptes utilisateurs
-- Vérifier les comptes médecins
+- Gérer les comptes utilisateurs (patients + médecins)
+- Vérifier et approuver les comptes médecins (validation RPPS)
+- Suspendre ou bannir un compte
 - Modérer les avis
-- Superviser la plateforme
+- Superviser la plateforme (statistiques globales)
 - Gérer les catégories de spécialités médicales
-- Consulter des statistiques globales
 
 ---
 
@@ -64,11 +66,13 @@ Six **Contextes Bornés** (Bounded Contexts) émergent naturellement :
 | # | Module / Contexte Borné | Responsabilité principale | Raison clé de la séparation |
 |---|---|---|---|
 | 1 | **Identity & Access** | Qui êtes-vous ? Authentification, création de comptes (patient/médecin) et validation des diplômes | La sécurité et le processus de vérification des praticiens sont critiques et isolés |
-| 2 | **Medical Directory** | Qu'est-ce qui est disponible ? Recherche, spécialités et profils publics des médecins | La logique de recherche (filtres, villes) évolue différemment de la prise de rendez-vous |
+| 2 | **Medical Directory** | Qu'est-ce qui est disponible ? Recherche et profils publics des médecins (découvrabilité uniquement) | La logique de recherche évolue différemment de la prise de rendez-vous ; ce module ne gère pas les créneaux |
 | 3 | **Appointment** | Quand se voit-on ? Gestion des créneaux, réservations, annulations et reports | C'est le cœur du métier avec des règles de collision et de disponibilité complexes |
-| 4 | **Health Record** | Quels sont les faits ? Stockage sécurisé des ordonnances, comptes rendus et documents patients | La gestion des fichiers (PDF) et la confidentialité médicale exigent une infrastructure spécifique |
-| 5 | **Notification** | Comment informer ? Rappels automatiques, alertes de report et emails de confirmation | Ce module est souvent asynchrone (Event-Driven) pour ne pas bloquer le reste de l'app |
-| 6 | **Administration** | Comment va la plateforme ? Modération des avis et statistiques de fréquentation | Les outils d'analyse et de modération sont destinés aux administrateurs, pas aux utilisateurs |
+| 4 | **Health Record** | Quels sont les faits médicaux ? Stockage sécurisé des ordonnances, comptes rendus et documents patients | La gestion des fichiers et la confidentialité médicale (RGPD, secret médical) exigent une infrastructure isolée |
+| 5 | **Notification** | Comment informer ? Rappels automatiques, alertes de report et emails de confirmation | Ce module est asynchrone (Event-Driven) et réagit à des événements d'autres modules sans être couplé à eux |
+| 6 | **Administration** | Comment va la plateforme ? Modération des avis, statistiques et gouvernance | Les outils d'analyse et de modération sont destinés aux administrateurs, pas aux utilisateurs finaux |
+
+---
 
 ### Carte des dépendances entre modules
 
@@ -77,37 +81,46 @@ Six **Contextes Bornés** (Bounded Contexts) émergent naturellement :
                   │   Identity & Access   │
                   └───────────┬───────────┘
                               │ (Token JWT / Rôle : Patient, Médecin, Admin)
-          ┌───────────────────┼───────────────────┐
-          ▼                   ▼                   ▼
-  ┌───────────────┐   ┌───────────────┐   ┌──────────────┐
-  │   Directory   │   │  Appointment  │   │ Governance   │
-  └───────┬───────┘   └───────┬───────┘   └──────────────┘
+          ┌───────────────────┼──────────────────┐
+          ▼                   ▼                  ▼
+  ┌───────────────┐   ┌───────────────┐  ┌──────────────────┐
+  │   Directory   │   │  Appointment  │  │  Administration  │
+  └───────┬───────┘   └───────┬───────┘  └──────────────────┘
           │                   │
-          │ (ID Praticien)    │ (Événements : RdvCréé, RdvAnnulé)
+          │ (ID Médecin)      │ (RdvId → DossierMédicalId)
           └─────────┬─────────┘
                     ▼
           ┌───────────────────┐
           │   Health Record   │
-          └─────────┬─────────┘
-                    │
-                    │ (Événements domaine : RdvConfirmé,
-                    │  OrdonnanceDéposée, RappelProche...)
-                    ▼
-          ┌───────────────────┐
-          │   Notification    │
           └───────────────────┘
+                    
+          ┌──────────────────────────────────────────────────┐
+          │  Événements domaine publiés (bus d'événements) : │
+          │  RdvConfirmé, RdvAnnulé (Appointment)            │
+          │  OrdonnanceDéposée (Health Record)               │
+          │  CompteApprouvé (Identity)                       │
+          │  AvisModéré (Administration)                     │
+          └──────────────────┬───────────────────────────────┘
+                             ▼
+                   ┌───────────────────┐
+                   │   Notification    │
+                   └───────────────────┘
 ```
 
-> **Faible couplage garanti :** Les modules de MediLink ne se parlent jamais directement en s'important les uns les autres dans leur code. À la place, ils communiquent de deux manières. Premièrement, via des **interfaces (Principe d'Inversion de Dépendance — DIP)** : par exemple, le module `Appointment` ne connaît pas l'existence de `Notification` ; il se contente de publier un **événement domaine** (`RdvConfirmé`). `Notification` écoute cet événement de façon indépendante et décide quoi envoyer et par quel canal (email, SMS, push). Si demain on change de fournisseur d'emails, on ne touche qu'à `Notification`, jamais à `Appointment`. Deuxièmement, quand un module a besoin d'une donnée d'un autre (ex : `Appointment` a besoin de savoir si un médecin existe), il ne va pas chercher dans la base de données du module `Directory` — il appelle une **interface exposée** (une API interne), ce qui garantit que chaque module reste maître de ses propres données.
+
+
+> **Faible couplage garanti :** Les modules de MediLink ne s'importent jamais directement. Ils communiquent via deux mécanismes :
+> - Des **événements domaine** publiés sur un bus (ex. : `Appointment` publie `RdvConfirmé`, `Notification` écoute) ;
+> - Des **interfaces exposées** (APIs internes) quand un module a besoin d'une donnée d'un autre. Chaque module reste maître de ses propres données.
 
 ---
 
 ## Étape 3 — Entités métier par module
 
 > **Vocabulaire :**
-> - **Entité** — Possède une identité unique (un `id`), est mutable dans le temps (ex : un rendez-vous peut changer de statut)
-> - **Objet Valeur (Value Object)** — Pas d'identité propre, immuable, défini entièrement par ses valeurs (ex : une adresse, un créneau horaire)
-> - **Racine d'Agrégat** — Le "chef" d'un groupe d'entités liées ; les autres modules n'interagissent qu'avec lui, jamais directement avec ses enfants
+> - **Entité** — Possède une identité unique (`id`), est mutable dans le temps 
+> - **Objet Valeur (Value Object)** — Pas d'identité propre, immuable, défini entièrement par ses valeurs 
+> - **Racine d'Agrégat** — Le "chef" d'un groupe d'entités liées ; les autres modules n'interagissent qu'avec lui via son `id`, jamais directement avec ses entités enfants
 
 ---
 
@@ -121,29 +134,31 @@ Six **Contextes Bornés** (Bounded Contexts) émergent naturellement :
 |---|---|---|
 | `id` | UUID | Identifiant unique généré par le système |
 | `email` | String | Identifiant de connexion |
-| `motDePasseHash` | String | Sécurité (jamais en clair) |
+| `motDePasseHash` | String | Sécurité (jamais stocké en clair) |
 | `role` | Enum : `PATIENT, MEDECIN, ADMIN` | Contrôle des droits d'accès |
 | `statut` | Enum : `EN_ATTENTE, ACTIF, SUSPENDU` | Cycle de vie du compte |
-| `créeAt` | DateTime | Traçabilité |
+| `createdAt` | DateTime | Traçabilité |
 
 #### Entité : `ProfilPatient` *(appartient à User)*
 
 | Attribut | Type | Pourquoi il existe |
 |---|---|---|
-| `userId` | UUID | Lien vers le User parent |
+| `userId` | UUID | Lien vers le `User` parent |
 | `prénom` | String | Identification civile |
 | `nom` | String | Identification civile |
 | `dateNaissance` | LocalDate | Informations médicales de base |
 | `téléphone` | String | Contact et notifications SMS |
+| `adresse` | Adresse | Objet Valeur : lieu de résidence |
 
 #### Entité : `ProfilMédecin` *(appartient à User)*
 
 | Attribut | Type | Pourquoi il existe |
 |---|---|---|
-| `userId` | UUID | Lien vers le User parent |
-| `numRPPS` | String | Numéro officiel de praticien (vérification) |
+| `userId` | UUID | Lien vers le `User` parent |
+| `numRPPS` | String | Numéro officiel de praticien (vérification légale) |
+| `spécialitéLabel` | String | Label de spécialité (simple, sans FK vers Directory) |
 | `statutVérification` | Enum : `EN_ATTENTE, APPROUVÉ, REJETÉ` | Processus de validation admin |
-| `spécialitéId` | UUID | Référence vers le Directory |
+
 
 #### Objet Valeur : `Adresse`
 
@@ -154,9 +169,8 @@ Six **Contextes Bornés** (Bounded Contexts) émergent naturellement :
 | `codePostal` | String |
 | `pays` | String |
 
-> **Pourquoi `Adresse` est un Objet Valeur ?** Une adresse n'a pas d'identité propre — deux médecins peuvent avoir la même adresse de cabinet sans que ce soit le même objet. Si l'adresse change, on la remplace entièrement, on ne la "modifie" pas.
 
-## Diagramme de Classes - Identity & Access
+#### Diagramme de Classes — Identity & Access
 
 ```mermaid
 classDiagram
@@ -180,30 +194,9 @@ classDiagram
         APPROUVE
         REJETE
     }
-  
 
-    class ProfilPatient {
-        <<Entité>>
-        +String prenom
-        +String nom
-        +LocalDate dateNaissance
-        +String telephone
-        +mettreAJourContact(tel) void
-        +getNomComplet() String
-        +calculerAge() Integer
-    }
-
-    class ProfilMedecin {
-        <<Entité>>
-        +String numRPPS
-        +StatutVerification statutVerif
-        +UUID specialiteId
-        +approuverVerification() void
-        +rejeterVerification(raison) void
-        +estVerifie() Boolean
-    }
- class User {
-        <<Racine d'Agrégat>>
+    class User {
+        <<Racine d Agregat>>
         +UUID id
         +String email
         +String motDePasseHash
@@ -215,6 +208,29 @@ classDiagram
         +suspendre(raison) void
     }
 
+    class ProfilPatient {
+        <<Entite>>
+        +UUID userId
+        +String prenom
+        +String nom
+        +LocalDate dateNaissance
+        +String telephone
+        +Adresse adresse
+        +mettreAJourContact(tel) void
+        +getNomComplet() String
+    }
+
+    class ProfilMedecin {
+        <<Entite>>
+        +UUID userId
+        +String numRPPS
+        +String specialiteLabel
+        +StatutVerification statutVerif
+        +approuverVerification() void
+        +rejeterVerification(raison) void
+        +estVerifie() Boolean
+    }
+
     class Adresse {
         <<Objet Valeur>>
         +String rue
@@ -223,21 +239,19 @@ classDiagram
         +String pays
     }
 
-      ProfilMedecin --|> User : complète
-      ProfilPatient --|> User : complète
-  
-      ProfilPatient *-- Adresse : réside à   
-      ProfilMedecin *-- Adresse : travaille à
-
-      StatutVerification .. ProfilMedecin
-      StatutCompte .. User
-      RoleUtilisateur .. User
+    User "1" *-- "0..1" ProfilPatient : possede
+    User "1" *-- "0..1" ProfilMedecin : possede
+    ProfilPatient *-- Adresse : reside a
+    ProfilMedecin .. StatutVerification 
+    User .. StatutCompte 
+    User .. RoleUtilisateur 
 ```
+
 ---
 
 ### Module 2 — `Medical Directory`
 
-**Rôle :** Le catalogue public des médecins. C'est ce que voit un patient quand il cherche un praticien. Ce module ne gère ni les rendez-vous ni les dossiers — uniquement la **découvrabilité**.
+**Rôle :** Le catalogue public des médecins. C'est ce que voit un patient quand il cherche un praticien. Ce module gère uniquement la **découvrabilité** — il ne gère pas les créneaux (c'est `Appointment`) et n'accède pas aux dossiers médicaux.
 
 #### Racine d'Agrégat : `ProfilPublicMédecin`
 
@@ -246,51 +260,31 @@ classDiagram
 | `id` | UUID | Identifiant unique |
 | `médecinId` | UUID | Référence vers `Identity` (jamais les données complètes) |
 | `nomAffichage` | String | Nom visible dans les résultats de recherche |
-| `spécialité` | Spécialité | Objet Valeur décrivant la discipline |
-| `biographie` | String | Présentation du praticien |
+| `spécialité` | Spécialité | Objet Valeur décrivant la discipline médicale |
+| `biographie` | String | Présentation libre du praticien |
 | `adresseCabinet` | Adresse | Localisation pour la recherche géographique |
-| `notesMoyenne` | Decimal | Calculée depuis les avis (`Administration`) |
+| `notesMoyenne` | Decimal | Dénormalisée, mise à jour via événement `AvisPublié` depuis Administration |
 | `accepteNouveauxPatients` | Boolean | Fonctionnalité : ouvrir/fermer les réservations |
-
-#### Entité : `CréneauDisponible` *(appartient à ProfilPublicMédecin)*
-
-| Attribut | Type | Pourquoi il existe |
-|---|---|---|
-| `id` | UUID | Identifiant unique |
-| `médecinId` | UUID | Lien vers le médecin |
-| `plage` | PlageHoraire | Objet Valeur : début + fin |
-| `statut` | Enum : `LIBRE, RÉSERVÉ, BLOQUÉ` | Gestion de la disponibilité |
 
 #### Objet Valeur : `Spécialité`
 
 | Attribut | Type |
 |---|---|
-| `code` | String (ex : `CARDIO`) |
-| `libellé` | String (ex : `Cardiologie`) |
+| `code` | String  |
+| `libellé` | String |
 | `icôneUrl` | String |
 
-#### Objet Valeur : `PlageHoraire`
 
-| Attribut | Type |
-|---|---|
-| `début` | LocalDateTime |
-| `fin` | LocalDateTime |
+#### Objet Valeur : `Adresse` *(réutilisé depuis Identity & Access)*
 
-## Diagramme de Classes - Medical Directory
+Même structure que dans `Identity & Access`. Chaque module conserve sa propre copie — pas de partage de classe entre modules (faible couplage).
+
+#### Diagramme de Classes — Medical Directory
 
 ```mermaid
-  classDiagram
-    %% Définition des énumérations (Tables séparées)
-    class StatutCreneau {
-        <<enumeration>>
-        LIBRE
-        RESERVE
-        BLOQUE
-    }
-
-    %% Classes principales
+classDiagram
     class ProfilPublicMedecin {
-        <<Racine d'Agrégat>>
+        <<Racine d Agregat>>
         +UUID id
         +UUID medecinId
         +String nomAffichage
@@ -300,17 +294,8 @@ classDiagram
         +Decimal notesMoyenne
         +Boolean accepteNouveauxPatients
         +modifierBio(texte) void
+        +mettreAJourNote(note) void
         +basculerDisponibilite() void
-    }
-
-    class CreneauDisponible {
-        <<Entité>>
-        +UUID id
-        +UUID medecinId
-        +PlageHoraire plage
-        +StatutCreneau statut
-        +reserver() void
-        +liberer() void
     }
 
     class Specialite {
@@ -318,13 +303,6 @@ classDiagram
         +String code
         +String libelle
         +String iconeUrl
-    }
-
-    class PlageHoraire {
-        <<Objet Valeur>>
-        +LocalDateTime debut
-        +LocalDateTime fin
-        +estValide() Boolean
     }
 
     class Adresse {
@@ -335,24 +313,15 @@ classDiagram
         +String pays
     }
 
-    %% Relations
-    %% Le créneau est une extension de la visibilité du médecin
-    CreneauDisponible <-- ProfilPublicMedecin : propose
-    
     ProfilPublicMedecin *-- Specialite : possede
     ProfilPublicMedecin *-- Adresse : est situe a
-    CreneauDisponible *-- PlageHoraire : definit
-    
-    %% Liens vers les enums
-    CreneauDisponible .. StatutCreneau
 ```
-> **Pourquoi `PlageHoraire` est un Objet Valeur ?** Un créneau de 9h à 9h30 le lundi ne change pas d'identité — si on le modifie, on en crée un nouveau. Cela empêche aussi les bugs de modification involontaire de l'horaire d'un rendez-vous déjà confirmé.
 
 ---
 
 ### Module 3 — `Appointment`
 
-**Rôle :** Le cœur du métier. Gérer le cycle de vie complet d'un rendez-vous, de la demande à la réalisation. C'est ici que se trouvent les règles métier les plus complexes (anti-collision de créneaux, règles d'annulation).
+**Rôle :** Le cœur du métier. Gérer le cycle de vie complet d'un rendez-vous (de la demande à la réalisation) et les créneaux de disponibilité des médecins. C'est ici que se trouvent les règles métier les plus complexes : anti-collision de créneaux, règles d'annulation, transitions d'état.
 
 #### Racine d'Agrégat : `RendezVous`
 
@@ -361,17 +330,27 @@ classDiagram
 | `id` | UUID | Identifiant unique |
 | `patientId` | UUID | Référence vers `Identity` |
 | `médecinId` | UUID | Référence vers `Identity` |
-| `créneauId` | UUID | Référence vers `Directory` |
+| `créneauId` | UUID | Référence vers `CréneauDisponible`  |
 | `motif` | String | Raison de la consultation |
 | `statut` | Enum : `DEMANDÉ, CONFIRMÉ, ANNULÉ, TERMINÉ` | Cycle de vie |
-| `créeAt` | DateTime | Traçabilité |
+| `résumé` | RésuméRdv | Snapshot immuable capturé à la confirmation |
+| `createdAt` | DateTime | Traçabilité |
 | `confirméAt` | DateTime (nullable) | Horodatage de confirmation |
 | `annuléAt` | DateTime (nullable) | Horodatage d'annulation |
 | `raisonAnnulation` | String (nullable) | Traçabilité et statistiques |
 
-> **Règle métier clé :** Quand un `RendezVous` passe au statut `CONFIRMÉ`, le module publie un événement domaine `RdvConfirmé`. C'est cet événement que `Notification` captera pour envoyer l'email de confirmation — le module `Appointment` ne sait pas et ne doit pas savoir comment fonctionne l'envoi d'email.
 
-#### Objet Valeur : `RésuméRdv` *(snapshot immuable)*
+#### Entité : `CréneauDisponible`
+
+| Attribut | Type | Pourquoi il existe |
+|---|---|---|
+| `id` | UUID | Identifiant unique |
+| `médecinId` | UUID | Lien vers le médecin propriétaire |
+| `plage` | PlageHoraire | Objet Valeur : début + fin |
+| `statut` | Enum : `LIBRE, RÉSERVÉ, BLOQUÉ` | Gestion de la disponibilité |
+
+
+#### Objet Valeur : `RésuméRdv`
 
 | Attribut | Type |
 |---|---|
@@ -380,10 +359,19 @@ classDiagram
 | `dateHeure` | LocalDateTime |
 | `adresseCabinet` | String |
 
-## Diagramme de Classes - Appointment
+#### Objet Valeur : `PlageHoraire`
+
+| Attribut | Type |
+|---|---|
+| `début` | LocalDateTime |
+| `fin` | LocalDateTime |
+
+
+
+#### Diagramme de Classes — Appointment
+
 ```mermaid
-  classDiagram
-    direction BT
+classDiagram
     class StatutRendezVous {
         <<enumeration>>
         DEMANDE
@@ -392,20 +380,39 @@ classDiagram
         TERMINE
     }
 
+    class StatutCreneau {
+        <<enumeration>>
+        LIBRE
+        RESERVE
+        BLOQUE
+    }
+
     class RendezVous {
-        <<Racine d'Agregat>>
+        <<Racine d Agregat>>
         +UUID id
         +UUID patientId
         +UUID medecinId
         +UUID creneauId
         +String motif
         +StatutRendezVous statut
+        +RésuméRdv resume
         +DateTime createdAt
         +DateTime confirmeAt
         +DateTime annuleAt
         +String raisonAnnulation
         +confirmer() void
         +annuler(raison) void
+    }
+
+    class CreneauDisponible {
+        <<Entite>>
+        +UUID id
+        +UUID medecinId
+        +PlageHoraire plage
+        +StatutCreneau statut
+        +reserver() void
+        +liberer() void
+        +bloquer() void
     }
 
     class ResumeRdv {
@@ -416,26 +423,36 @@ classDiagram
         +String adresseCabinet
     }
 
+    class PlageHoraire {
+        <<Objet Valeur>>
+        +LocalDateTime debut
+        +LocalDateTime fin
+        +estValide() Boolean
+        +chevauche(autre) Boolean
+    }
+
     RendezVous "1" *-- "1" ResumeRdv : archive
-    RendezVous --> StatutRendezVous : possede
+    RendezVous --> CreneauDisponible : reserve
+    CreneauDisponible *-- PlageHoraire : definit
+    RendezVous .. StatutRendezVous 
+    CreneauDisponible .. StatutCreneau 
 ```
-> **Pourquoi un snapshot ?** Au moment où le patient consulte son historique, le médecin a peut-être changé de cabinet. Le `RésuméRdv` capture les informations **au moment de la réservation**, comme une photo figée dans le temps. C'est le **patron Snapshot Immuable**, identique à celui utilisé dans EcoMeal pour les `OrderItem`.
 
 ---
 
 ### Module 4 — `Health Record`
 
-**Rôle :** Le coffre-fort médical. Stocker de façon sécurisée les documents échangés entre patient et médecin. Ce module est régi par des contraintes de confidentialité (RGPD, secret médical) — c'est pourquoi il est isolé de tous les autres.
+**Rôle :** Le coffre-fort médical. Stocker de façon sécurisée les documents échangés entre patient et médecin. Ce module est régi par des contraintes de confidentialité (RGPD, secret médical) — c'est pourquoi il est rigoureusement isolé de tous les autres.
 
 #### Racine d'Agrégat : `DossierMédical`
 
 | Attribut | Type | Pourquoi il existe |
 |---|---|---|
 | `id` | UUID | Identifiant unique |
-| `patientId` | UUID | Propriétaire du dossier |
-| `documents` | List\<Document\> | Collection de tous les fichiers |
+| `patientId` | UUID | Propriétaire du dossier (référence vers `Identity`) |
+| `documents` | List\<Document\> | Collection de tous les fichiers du patient |
 
-#### Entité : `Document` *(appartient à DossierMédical)*
+#### Entité : `Document` *(appartient à `DossierMédical`)*
 
 | Attribut | Type | Pourquoi il existe |
 |---|---|---|
@@ -443,9 +460,10 @@ classDiagram
 | `dossierMédicalId` | UUID | Lien vers le dossier parent |
 | `type` | Enum : `ORDONNANCE, COMPTE_RENDU, ANALYSE, AUTRE` | Catégorisation |
 | `téléversePar` | UUID | ID du médecin ou patient auteur |
-| `urlStockage` | String | Chemin sécurisé vers le fichier (S3, etc.) |
+| `urlStockage` | String | Chemin sécurisé vers le fichier (S3, Azure Blob…) |
+| `métadonnées` | MétadonnéesFichier | Objet Valeur : informations techniques du fichier |
 | `statut` | Enum : `EN_ATTENTE, DISPONIBLE, ARCHIVÉ` | Cycle de vie |
-| `créeAt` | DateTime | Traçabilité et tri chronologique |
+| `createdAt` | DateTime | Traçabilité et tri chronologique |
 
 #### Objet Valeur : `MétadonnéesFichier`
 
@@ -453,13 +471,15 @@ classDiagram
 |---|---|
 | `nomOriginal` | String |
 | `tailleMo` | Decimal |
-| `formatMime` | String (ex : `application/pdf`) |
-| `checksum` | String (SHA-256) |
+| `formatMime` | String |
+| `checksum` | String  |
 
-## Diagramme de Classes - Health Record
+
+
+#### Diagramme de Classes — Health Record
+
 ```mermaid
-  classDiagram
-    %% Définition des énumérations (Tables séparées)
+classDiagram
     class TypeDocument {
         <<enumeration>>
         ORDONNANCE
@@ -475,23 +495,24 @@ classDiagram
         ARCHIVE
     }
 
-    %% Classes principales
     class DossierMedical {
-        <<Racine d'Agrégat>>
+        <<Racine d Agregat>>
         +UUID id
         +UUID patientId
+        +List~Document~ documents
         +ajouterDocument(doc) void
         +archiverDocument(docId) void
         +getHistorique() List~Document~
     }
 
     class Document {
-        <<Entité>>
+        <<Entite>>
         +UUID id
         +UUID dossierMedicalId
         +TypeDocument type
         +UUID televersePar
         +String urlStockage
+        +MétadonnéesFichier metadonnees
         +StatutDocument statut
         +DateTime creeAt
         +modifierStatut(nouveau) void
@@ -505,16 +526,72 @@ classDiagram
         +String checksum
     }
 
-    %% Relations
-    %% Le document est une extension du dossier médical du patient
-    Document <-- DossierMedical : contient
-
+    DossierMedical "1" *-- "0..*" Document : contient
     Document *-- MetadonneesFichier : decrit par
-
-    %% Liens vers les enums
-    Document .. TypeDocument
-    Document .. StatutDocument
+    Document ..> TypeDocument : utilise
+    Document ..> StatutDocument : utilise
 ```
-> **Pourquoi `MétadonnéesFichier` est un Objet Valeur ?** Ces informations décrivent le fichier tel qu'il était au moment du dépôt. Elles ne changent jamais — si le fichier est remplacé, c'est un nouveau `Document` qui est créé, pas une modification de l'ancien. Cela garantit l'intégrité de l'historique médical.
 
 ---
+
+### Module 5 — `Notification`
+
+**Rôle :** Ce module ne contient aucune entité métier au sens DDD — il est **purement réactif**. Il s'abonne aux événements domaine émis par les autres modules et les convertit en communications (email, SMS, push).
+
+#### Entité : `JournalNotification` *(piste d'audit)*
+
+| Attribut | Type | Pourquoi il existe |
+|---|---|---|
+| `id` | UUID | Identifiant unique |
+| `destinataireId` | UUID | Référence vers l'utilisateur cible |
+| `canal` | Enum : `EMAIL, SMS, PUSH` | Canal de communication choisi |
+| `type` | Enum : `RDV_CONFIRMÉ, RDV_ANNULÉ, RAPPEL_RDV, DOCUMENT_DISPONIBLE, COMPTE_APPROUVÉ` | Type d'événement ayant déclenché la notif |
+| `contenu` | JSON | Données de l'événement (sérialisées) |
+| `envoyéAt` | DateTime | Horodatage d'envoi |
+| `statut` | Enum : `ENVOYÉ, ÉCHEC, IGNORÉ` | Résultat de la livraison |
+
+#### Événements domaine consommés (depuis les autres modules)
+
+| Événement | Émis par | Action |
+|---|---|---|
+| `RdvConfirmé` | Appointment | Notifier le patient (confirmation) + le médecin (agenda mis à jour) |
+| `RdvAnnulé` | Appointment | Notifier le patient et le médecin |
+| `RappelRdvProche` | Appointment (tâche planifiée) | Envoyer un rappel 24h avant au patient |
+| `OrdonnanceDéposée` | Health Record | Notifier le patient qu'un document est disponible |
+| `CompteApprouvé` | Identity & Access | Notifier le médecin de l'activation de son compte |
+| `AvisModéré` | Administration | Notifier le patient concerné |
+
+---
+
+### Module 6 — `Administration`
+
+**Rôle :** Gouvernance, modération et supervision de la plateforme. Ces fonctionnalités sont réservées aux administrateurs et évoluent au rythme de la politique interne, indépendamment des fonctionnalités produit.
+
+#### Entité : `Avis`
+
+| Attribut | Type | Pourquoi il existe |
+|---|---|---|
+| `id` | UUID | Identifiant unique |
+| `patientId` | UUID | Auteur de l'avis |
+| `médecinId` | UUID | Médecin évalué |
+| `rendezVousId` | UUID | Lien vers le rendez-vous concerné (preuve de consultation) |
+| `note` | Integer (1–5) | Note attribuée |
+| `commentaire` | String | Texte libre |
+| `répondreParMédecin` | String (nullable) | Réponse du praticien |
+| `statut` | Enum : `VISIBLE, SIGNALÉ, SUPPRIMÉ` | Modération |
+| `createdAt` | DateTime | Traçabilité |
+
+#### Entité : `RapportModération`
+
+| Attribut | Type | Pourquoi il existe |
+|---|---|---|
+| `id` | UUID | Identifiant unique |
+| `signaléPar` | UUID | Référence vers l'utilisateur |
+| `cibleType` | Enum : `AVIS, PROFIL` | Type de contenu signalé |
+| `cibleId` | UUID | Identifiant de l'entité signalée |
+| `raison` | String | Motif du signalement |
+| `statut` | Enum : `EN_ATTENTE, EXAMINÉ, TRAITÉ` | Suivi admin |
+
+---
+
+
