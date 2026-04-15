@@ -156,6 +156,80 @@ Six **Contextes Bornés** (Bounded Contexts) émergent naturellement :
 
 > **Pourquoi `Adresse` est un Objet Valeur ?** Une adresse n'a pas d'identité propre — deux médecins peuvent avoir la même adresse de cabinet sans que ce soit le même objet. Si l'adresse change, on la remplace entièrement, on ne la "modifie" pas.
 
+## Diagramme de Classes - Gestion des Utilisateurs
+
+```mermaid
+classDiagram
+    class RoleUtilisateur {
+        <<enumeration>>
+        PATIENT
+        MEDECIN
+        ADMIN
+    }
+
+    class StatutCompte {
+        <<enumeration>>
+        EN_ATTENTE
+        ACTIF
+        SUSPENDU
+    }
+
+    class StatutVerification {
+        <<enumeration>>
+        EN_ATTENTE
+        APPROUVE
+        REJETE
+    }
+  
+
+    class ProfilPatient {
+        <<Entité>>
+        +String prenom
+        +String nom
+        +LocalDate dateNaissance
+        +String telephone
+        +mettreAJourContact(tel) void
+        +getNomComplet() String
+        +calculerAge() Integer
+    }
+
+    class ProfilMedecin {
+        <<Entité>>
+        +String numRPPS
+        +StatutVerification statutVerif
+        +UUID specialiteId
+        +approuverVerification() void
+        +rejeterVerification(raison) void
+        +estVerifie() Boolean
+    }
+ class User {
+        <<Racine d'Agrégat>>
+        +UUID id
+        +String email
+        +String motDePasseHash
+        +RoleUtilisateur role
+        +StatutCompte statut
+        +DateTime createdAt
+        +verifierIdentifiants(pwd) Boolean
+        +activer() void
+        +suspendre(raison) void
+    }
+
+    class Adresse {
+        <<Objet Valeur>>
+        +String rue
+        +String ville
+        +String codePostal
+        +String pays
+    }
+
+ProfilMedecin --|> User : complète
+ProfilPatient --|> User : complète
+  
+      ProfilPatient *-- Adresse : réside à   
+ProfilMedecin *-- Adresse : travaille à
+  
+```
 ---
 
 ### Module 2 — `Medical Directory`
