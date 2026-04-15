@@ -109,7 +109,7 @@ Six **Contextes Bornés** (Bounded Contexts) émergent naturellement :
 > - **Entité** — Possède une identité unique, est mutable dans le temps
 > - **Objet Valeur (Value Object)** — Pas d'identité, immuable, défini entièrement par ses valeurs
 > - **Racine d'Agrégat** — Point d'entrée unique d'un groupe d'entités liées
-
+(TO DO)
 
 *Document produit dans le cadre du projet MediLink*  
 
