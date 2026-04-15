@@ -156,7 +156,7 @@ Six **Contextes Bornés** (Bounded Contexts) émergent naturellement :
 
 > **Pourquoi `Adresse` est un Objet Valeur ?** Une adresse n'a pas d'identité propre — deux médecins peuvent avoir la même adresse de cabinet sans que ce soit le même objet. Si l'adresse change, on la remplace entièrement, on ne la "modifie" pas.
 
-## Diagramme de Classes - Gestion des Utilisateurs
+## Diagramme de Classes - Identity & Access
 
 ```mermaid
 classDiagram
