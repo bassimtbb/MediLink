@@ -223,12 +223,15 @@ classDiagram
         +String pays
     }
 
-ProfilMedecin --|> User : complète
-ProfilPatient --|> User : complète
+      ProfilMedecin --|> User : complète
+      ProfilPatient --|> User : complète
   
       ProfilPatient *-- Adresse : réside à   
-ProfilMedecin *-- Adresse : travaille à
-  
+      ProfilMedecin *-- Adresse : travaille à
+
+      StatutVerification .. ProfilMedecin
+      StatutCompte .. User
+      RoleUtilisateur .. User
 ```
 ---
 
@@ -273,6 +276,76 @@ ProfilMedecin *-- Adresse : travaille à
 | `début` | LocalDateTime |
 | `fin` | LocalDateTime |
 
+## Diagramme de Classes - Identity & Access
+
+```mermaid
+  classDiagram
+    %% Définition des énumérations (Tables séparées)
+    class StatutCreneau {
+        <<enumeration>>
+        LIBRE
+        RESERVE
+        BLOQUE
+    }
+
+    %% Classes principales
+    class ProfilPublicMedecin {
+        <<Racine d'Agrégat>>
+        +UUID id
+        +UUID medecinId
+        +String nomAffichage
+        +Specialite specialite
+        +String biographie
+        +Adresse adresseCabinet
+        +Decimal notesMoyenne
+        +Boolean accepteNouveauxPatients
+        +modifierBio(texte) void
+        +basculerDisponibilite() void
+    }
+
+    class CreneauDisponible {
+        <<Entité>>
+        +UUID id
+        +UUID medecinId
+        +PlageHoraire plage
+        +StatutCreneau statut
+        +reserver() void
+        +liberer() void
+    }
+
+    class Specialite {
+        <<Objet Valeur>>
+        +String code
+        +String libelle
+        +String iconeUrl
+    }
+
+    class PlageHoraire {
+        <<Objet Valeur>>
+        +LocalDateTime debut
+        +LocalDateTime fin
+        +estValide() Boolean
+    }
+
+    class Adresse {
+        <<Objet Valeur>>
+        +String rue
+        +String ville
+        +String codePostal
+        +String pays
+    }
+
+    %% Relations
+    %% Le créneau est une extension de la visibilité du médecin
+    CreneauDisponible <-- ProfilPublicMedecin : propose
+    
+    ProfilPublicMedecin *-- Specialite : possede
+    ProfilPublicMedecin *-- Adresse : est situe a
+    CreneauDisponible *-- PlageHoraire : definit
+    
+    %% Liens vers les enums
+    CreneauDisponible .. StatutCreneau
+```
 > **Pourquoi `PlageHoraire` est un Objet Valeur ?** Un créneau de 9h à 9h30 le lundi ne change pas d'identité — si on le modifie, on en crée un nouveau. Cela empêche aussi les bugs de modification involontaire de l'horaire d'un rendez-vous déjà confirmé.
 
 ---
@@ -307,6 +380,45 @@ ProfilMedecin *-- Adresse : travaille à
 | `dateHeure` | LocalDateTime |
 | `adresseCabinet` | String |
 
+## Diagramme de Classes - Identity & Access
+```mermaid
+  classDiagram
+    direction BT
+    class StatutRendezVous {
+        <<enumeration>>
+        DEMANDE
+        CONFIRME
+        ANNULE
+        TERMINE
+    }
+
+    class RendezVous {
+        <<Racine d'Agregat>>
+        +UUID id
+        +UUID patientId
+        +UUID medecinId
+        +UUID creneauId
+        +String motif
+        +StatutRendezVous statut
+        +DateTime createdAt
+        +DateTime confirmeAt
+        +DateTime annuleAt
+        +String raisonAnnulation
+        +confirmer() void
+        +annuler(raison) void
+    }
+
+    class ResumeRdv {
+        <<Objet Valeur>>
+        +String nomMedecin
+        +String specialite
+        +LocalDateTime dateHeure
+        +String adresseCabinet
+    }
+
+    RendezVous "1" *-- "1" ResumeRdv : archive
+    RendezVous --> StatutRendezVous : possede
+```
 > **Pourquoi un snapshot ?** Au moment où le patient consulte son historique, le médecin a peut-être changé de cabinet. Le `RésuméRdv` capture les informations **au moment de la réservation**, comme une photo figée dans le temps. C'est le **patron Snapshot Immuable**, identique à celui utilisé dans EcoMeal pour les `OrderItem`.
 
 ---
@@ -344,6 +456,65 @@ ProfilMedecin *-- Adresse : travaille à
 | `formatMime` | String (ex : `application/pdf`) |
 | `checksum` | String (SHA-256) |
 
+## Diagramme de Classes - Identity & Access
+```mermaid
+  classDiagram
+    %% Définition des énumérations (Tables séparées)
+    class TypeDocument {
+        <<enumeration>>
+        ORDONNANCE
+        COMPTE_RENDU
+        ANALYSE
+        AUTRE
+    }
+
+    class StatutDocument {
+        <<enumeration>>
+        EN_ATTENTE
+        DISPONIBLE
+        ARCHIVE
+    }
+
+    %% Classes principales
+    class DossierMedical {
+        <<Racine d'Agrégat>>
+        +UUID id
+        +UUID patientId
+        +ajouterDocument(doc) void
+        +archiverDocument(docId) void
+        +getHistorique() List~Document~
+    }
+
+    class Document {
+        <<Entité>>
+        +UUID id
+        +UUID dossierMedicalId
+        +TypeDocument type
+        +UUID televersePar
+        +String urlStockage
+        +StatutDocument statut
+        +DateTime creeAt
+        +modifierStatut(nouveau) void
+    }
+
+    class MetadonneesFichier {
+        <<Objet Valeur>>
+        +String nomOriginal
+        +Decimal tailleMo
+        +String formatMime
+        +String checksum
+    }
+
+    %% Relations
+    %% Le document est une extension du dossier médical du patient
+    Document <-- DossierMedical : contient
+
+    Document *-- MetadonneesFichier : decrit par
+
+    %% Liens vers les enums
+    Document .. TypeDocument
+    Document .. StatutDocument
+```
 > **Pourquoi `MétadonnéesFichier` est un Objet Valeur ?** Ces informations décrivent le fichier tel qu'il était au moment du dépôt. Elles ne changent jamais — si le fichier est remplacé, c'est un nouveau `Document` qui est créé, pas une modification de l'ancien. Cela garantit l'intégrité de l'historique médical.
 
 ---
