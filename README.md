@@ -1,596 +1,543 @@
-# MediLink — Workflow de Conception
-
-> **Projet :** MediLink — Application de mise en relation entre patients et médecins pour la prise de rendez-vous en ligne, la gestion des créneaux et le partage sécurisé de documents médicaux.
-
----
-
-## Table des matières
-
-1. [Étape 1 — Liste brute des fonctionnalités](#étape-1--liste-brute-des-fonctionnalités)
-2. [Étape 2 — Regroupement par domaine métier (DDD)](#étape-2--regroupement-par-domaine-métier-ddd)
-3. [Étape 3 — Entités métier par module](#étape-3--entités-métier-par-module)
+# Multimodal RAG for Automotive Engineering
+### A Complete Technical Reference — Architecture, Concepts & Roadmap
 
 ---
 
-## Étape 1 — Liste brute des fonctionnalités
+## Table of Contents
 
-> **Méthode :** Liste exhaustive, non triée. Mode « fonctionnel pur » — *ce que* fait l'application, pas *comment* elle est construite. Trois perspectives : Patient, Médecin, et Administrateur système.
-
-### 👤 Patient
-
-- Créer un compte
-- Se connecter / Se déconnecter
-- Modifier son profil (nom, prénom, date de naissance, téléphone)
-- Rechercher un médecin par spécialité, ville ou nom
-- Consulter les créneaux disponibles d'un médecin
-- Prendre un rendez-vous
-- Annuler ou déplacer un rendez-vous
-- Recevoir des rappels par notification ou email
-- Consulter l'historique des rendez-vous
-- Déposer des documents médicaux
-- Consulter des ordonnances ou comptes rendus
-- Laisser un avis sur le praticien
-
-### 🩺 Médecin
-
-- Créer un compte professionnel (avec numéro RPPS)
-- Renseigner sa spécialité
-- Définir ses horaires de consultation
-- Ouvrir ou fermer des créneaux
-- Consulter son agenda du jour
-- Accepter ou refuser certaines demandes de rendez-vous
-- Consulter le dossier administratif du patient (lors du rendez-vous)
-- Déposer une ordonnance
-- Déposer un compte rendu
-- Suivre l'historique de ses rendez-vous
-- Répondre aux avis patients
-
-### 🛡️ Administrateur Système
-
-- Gérer les comptes utilisateurs (patients + médecins)
-- Vérifier et approuver les comptes médecins (validation RPPS)
-- Suspendre ou bannir un compte
-- Modérer les avis
-- Superviser la plateforme (statistiques globales)
-- Gérer les catégories de spécialités médicales
+1. [What is RAG?](#1-what-is-rag)
+2. [Hybrid RAG](#2-hybrid-rag)
+3. [Full Multimodal RAG](#3-full-multimodal-rag)
+4. [Hybrid Multimodal RAG](#4-hybrid-multimodal-rag)
+5. [Recommended Architecture for This Project](#5-recommended-architecture-for-this-project)
+6. [Project Roadmap](#6-project-roadmap)
 
 ---
 
-## Étape 2 — Regroupement par domaine métier (DDD)
+## 1. What is RAG?
 
-> **Principe appliqué :** Forte cohésion au sein de chaque module (toutes les fonctionnalités partagent la même raison métier d'évoluer), faible couplage entre les modules (chaque module expose des interfaces propres et ne dépend pas des détails internes d'un autre).
+**Retrieval-Augmented Generation (RAG)** is an AI architecture pattern that gives a Large Language Model (LLM) access to an external knowledge base at inference time — instead of relying solely on what was baked into its weights during training.
 
-Six **Contextes Bornés** (Bounded Contexts) émergent naturellement :
+### Why RAG exists
 
-| # | Module / Contexte Borné | Responsabilité principale | Raison clé de la séparation |
-|---|---|---|---|
-| 1 | **Identity & Access** | Qui êtes-vous ? Authentification, création de comptes (patient/médecin) et validation des diplômes | La sécurité et le processus de vérification des praticiens sont critiques et isolés |
-| 2 | **Medical Directory** | Qu'est-ce qui est disponible ? Recherche et profils publics des médecins (découvrabilité uniquement) | La logique de recherche évolue différemment de la prise de rendez-vous ; ce module ne gère pas les créneaux |
-| 3 | **Appointment** | Quand se voit-on ? Gestion des créneaux, réservations, annulations et reports | C'est le cœur du métier avec des règles de collision et de disponibilité complexes |
-| 4 | **Health Record** | Quels sont les faits médicaux ? Stockage sécurisé des ordonnances, comptes rendus et documents patients | La gestion des fichiers et la confidentialité médicale (RGPD, secret médical) exigent une infrastructure isolée |
-| 5 | **Notification** | Comment informer ? Rappels automatiques, alertes de report et emails de confirmation | Ce module est asynchrone (Event-Driven) et réagit à des événements d'autres modules sans être couplé à eux |
-| 6 | **Administration** | Comment va la plateforme ? Modération des avis, statistiques et gouvernance | Les outils d'analyse et de modération sont destinés aux administrateurs, pas aux utilisateurs finaux |
+An LLM trained on general data cannot know:
+- Your proprietary assembly manuals
+- Updated torque specifications from last quarter
+- Internal part IDs specific to your factory line
 
----
+RAG solves this by **retrieving relevant context on-the-fly** and injecting it into the prompt before the model generates its answer.
 
-### Carte des dépendances entre modules
-
-```
-                  ┌───────────────────────┐
-                  │   Identity & Access   │
-                  └───────────┬───────────┘
-                              │ (Token JWT / Rôle : Patient, Médecin, Admin)
-          ┌───────────────────┼──────────────────┐
-          ▼                   ▼                  ▼
-  ┌───────────────┐   ┌───────────────┐  ┌──────────────────┐
-  │   Directory   │   │  Appointment  │  │  Administration  │
-  └───────┬───────┘   └───────┬───────┘  └──────────────────┘
-          │                   │
-          │ (ID Médecin)      │ (RdvId → DossierMédicalId)
-          └─────────┬─────────┘
-                    ▼
-          ┌───────────────────┐
-          │   Health Record   │
-          └───────────────────┘
-                    
-          ┌──────────────────────────────────────────────────┐
-          │  Événements domaine publiés (bus d'événements) : │
-          │  RdvConfirmé, RdvAnnulé (Appointment)            │
-          │  OrdonnanceDéposée (Health Record)               │
-          │  CompteApprouvé (Identity)                       │
-          │  AvisModéré (Administration)                     │
-          └──────────────────┬───────────────────────────────┘
-                             ▼
-                   ┌───────────────────┐
-                   │   Notification    │
-                   └───────────────────┘
-```
-
-
-
-> **Faible couplage garanti :** Les modules de MediLink ne s'importent jamais directement. Ils communiquent via deux mécanismes :
-> - Des **événements domaine** publiés sur un bus (ex. : `Appointment` publie `RdvConfirmé`, `Notification` écoute) ;
-> - Des **interfaces exposées** (APIs internes) quand un module a besoin d'une donnée d'un autre. Chaque module reste maître de ses propres données.
-
----
-
-## Étape 3 — Entités métier par module
-
-> **Vocabulaire :**
-> - **Entité** — Possède une identité unique (`id`), est mutable dans le temps 
-> - **Objet Valeur (Value Object)** — Pas d'identité propre, immuable, défini entièrement par ses valeurs 
-> - **Racine d'Agrégat** — Le "chef" d'un groupe d'entités liées ; les autres modules n'interagissent qu'avec lui via son `id`, jamais directement avec ses entités enfants
-
----
-
-### Module 1 — `Identity & Access`
-
-**Rôle :** Gérer qui peut se connecter et avec quels droits. C'est le gardien de la plateforme.
-
-#### Racine d'Agrégat : `User`
-
-| Attribut | Type | Pourquoi il existe |
-|---|---|---|
-| `id` | UUID | Identifiant unique généré par le système |
-| `email` | String | Identifiant de connexion |
-| `motDePasseHash` | String | Sécurité (jamais stocké en clair) |
-| `role` | Enum : `PATIENT, MEDECIN, ADMIN` | Contrôle des droits d'accès |
-| `statut` | Enum : `EN_ATTENTE, ACTIF, SUSPENDU` | Cycle de vie du compte |
-| `createdAt` | DateTime | Traçabilité |
-
-#### Entité : `ProfilPatient` *(appartient à User)*
-
-| Attribut | Type | Pourquoi il existe |
-|---|---|---|
-| `userId` | UUID | Lien vers le `User` parent |
-| `prénom` | String | Identification civile |
-| `nom` | String | Identification civile |
-| `dateNaissance` | LocalDate | Informations médicales de base |
-| `téléphone` | String | Contact et notifications SMS |
-| `adresse` | Adresse | Objet Valeur : lieu de résidence |
-
-#### Entité : `ProfilMédecin` *(appartient à User)*
-
-| Attribut | Type | Pourquoi il existe |
-|---|---|---|
-| `userId` | UUID | Lien vers le `User` parent |
-| `numRPPS` | String | Numéro officiel de praticien (vérification légale) |
-| `spécialitéLabel` | String | Label de spécialité (simple, sans FK vers Directory) |
-| `statutVérification` | Enum : `EN_ATTENTE, APPROUVÉ, REJETÉ` | Processus de validation admin |
-
-
-#### Objet Valeur : `Adresse`
-
-| Attribut | Type |
-|---|---|
-| `rue` | String |
-| `ville` | String |
-| `codePostal` | String |
-| `pays` | String |
-
-
-#### Diagramme de Classes — Identity & Access
+### Basic RAG Flow
 
 ```mermaid
-classDiagram
-    class RoleUtilisateur {
-        <<enumeration>>
-        PATIENT
-        MEDECIN
-        ADMIN
-    }
+flowchart LR
+    A([User Query]) --> B[Embed Query\nvector]
+    B --> C[(Vector\nDatabase)]
+    C -->|Top-K similar chunks| D[Context Builder]
+    D --> E[LLM Prompt\n= Query + Context]
+    E --> F([Answer])
 
-    class StatutCompte {
-        <<enumeration>>
-        EN_ATTENTE
-        ACTIF
-        SUSPENDU
-    }
-
-    class StatutVerification {
-        <<enumeration>>
-        EN_ATTENTE
-        APPROUVE
-        REJETE
-    }
-
-    class User {
-        <<Racine d Agregat>>
-        +UUID id
-        +String email
-        +String motDePasseHash
-        +RoleUtilisateur role
-        +StatutCompte statut
-        +DateTime createdAt
-        +verifierIdentifiants(pwd) Boolean
-        +activer() void
-        +suspendre(raison) void
-    }
-
-    class ProfilPatient {
-        <<Entite>>
-        +UUID userId
-        +String prenom
-        +String nom
-        +LocalDate dateNaissance
-        +String telephone
-        +Adresse adresse
-        +mettreAJourContact(tel) void
-        +getNomComplet() String
-    }
-
-    class ProfilMedecin {
-        <<Entite>>
-        +UUID userId
-        +String numRPPS
-        +String specialiteLabel
-        +StatutVerification statutVerif
-        +approuverVerification() void
-        +rejeterVerification(raison) void
-        +estVerifie() Boolean
-    }
-
-    class Adresse {
-        <<Objet Valeur>>
-        +String rue
-        +String ville
-        +String codePostal
-        +String pays
-    }
-
-    User "1" *-- "0..1" ProfilPatient : possede
-    User "1" *-- "0..1" ProfilMedecin : possede
-    ProfilPatient *-- Adresse : reside a
-    ProfilMedecin .. StatutVerification 
-    User .. StatutCompte 
-    User .. RoleUtilisateur 
+    subgraph Ingestion Phase
+        G[Documents] --> H[Chunker]
+        H --> I[Embedder]
+        I --> C
+    end
 ```
+
+### Core Components
+
+| Component | Role | Example Tools |
+|-----------|------|---------------|
+| **Chunker** | Splits documents into manageable pieces | LangChain, Docling |
+| **Embedder** | Converts text chunks to dense vectors | `text-embedding-3-large`, BGE |
+| **Vector DB** | Stores and retrieves vectors by similarity | Qdrant, Weaviate, Pinecone |
+| **LLM** | Generates the final answer from context | Claude, GPT-4o |
+
+### Limitations of Naive RAG
+
+- Splitting documents naively **shreds table context** (a torque value without its column header is meaningless)
+- Pure semantic search **misses exact tokens** like part IDs (`M8-bolt-2025`)
+- No image understanding — PDFs with blueprints are treated as blind spots
+- No guaranteed citation → hallucination risk
 
 ---
 
-### Module 2 — `Medical Directory`
+## 2. Hybrid RAG
 
-**Rôle :** Le catalogue public des médecins. C'est ce que voit un patient quand il cherche un praticien. Ce module gère uniquement la **découvrabilité** — il ne gère pas les créneaux (c'est `Appointment`) et n'accède pas aux dossiers médicaux.
+**Hybrid RAG** addresses the retrieval gap by combining two fundamentally different search strategies.
 
-#### Racine d'Agrégat : `ProfilPublicMédecin`
+### The Problem with Pure Semantic Search
 
-| Attribut | Type | Pourquoi il existe |
-|---|---|---|
-| `id` | UUID | Identifiant unique |
-| `médecinId` | UUID | Référence vers `Identity` (jamais les données complètes) |
-| `nomAffichage` | String | Nom visible dans les résultats de recherche |
-| `spécialité` | Spécialité | Objet Valeur décrivant la discipline médicale |
-| `biographie` | String | Présentation libre du praticien |
-| `adresseCabinet` | Adresse | Localisation pour la recherche géographique |
-| `notesMoyenne` | Decimal | Dénormalisée, mise à jour via événement `AvisPublié` depuis Administration |
-| `accepteNouveauxPatients` | Boolean | Fonctionnalité : ouvrir/fermer les réservations |
+Semantic search finds *conceptually similar* content. But in engineering:
 
-#### Objet Valeur : `Spécialité`
+> `"47 Nm torque"` and `"74 Nm torque"` are semantically similar — they are safety-critically different.
 
-| Attribut | Type |
-|---|---|
-| `code` | String  |
-| `libellé` | String |
-| `icôneUrl` | String |
+> `"M8-bolt-2025"` must be found by exact token match, not by cosine similarity to "fastener".
 
-
-#### Objet Valeur : `Adresse` *(réutilisé depuis Identity & Access)*
-
-Même structure que dans `Identity & Access`. Chaque module conserve sa propre copie — pas de partage de classe entre modules (faible couplage).
-
-#### Diagramme de Classes — Medical Directory
+### Hybrid = Dense + Sparse
 
 ```mermaid
-classDiagram
-    class ProfilPublicMedecin {
-        <<Racine d Agregat>>
-        +UUID id
-        +UUID medecinId
-        +String nomAffichage
-        +Specialite specialite
-        +String biographie
-        +Adresse adresseCabinet
-        +Decimal notesMoyenne
-        +Boolean accepteNouveauxPatients
-        +modifierBio(texte) void
-        +mettreAJourNote(note) void
-        +basculerDisponibilite() void
-    }
+flowchart TB
+    Q([User Query]) --> A[Dense Encoder\nBGE / text-embedding]
+    Q --> B[Sparse Encoder\nBM25 / SPLADE]
 
-    class Specialite {
-        <<Objet Valeur>>
-        +String code
-        +String libelle
-        +String iconeUrl
-    }
+    A -->|Semantic similarity| C[(Vector Index)]
+    B -->|Keyword match| D[(Inverted Index)]
 
-    class Adresse {
-        <<Objet Valeur>>
-        +String rue
-        +String ville
-        +String codePostal
-        +String pays
-    }
+    C --> E[Result Set A]
+    D --> F[Result Set B]
 
-    ProfilPublicMedecin *-- Specialite : possede
-    ProfilPublicMedecin *-- Adresse : est situe a
+    E --> G[Reciprocal Rank Fusion\nRRF]
+    F --> G
+
+    G --> H[Unified Ranked Results]
+    H --> I[LLM → Answer]
 ```
+
+### Reciprocal Rank Fusion (RRF)
+
+RRF merges two ranked lists without needing to normalize scores:
+
+```
+RRF_score(doc) = Σ  1 / (k + rank_in_list_i)
+```
+
+- `k = 60` is a common default
+- A document ranked #1 in both lists scores higher than one ranked #1 in only one list
+- Safe to combine lists from systems with incompatible score scales
+
+### When to use each retriever
+
+| Query Type | Best Retriever | Example |
+|------------|---------------|---------|
+| Conceptual question | Dense (semantic) | "How does the rear subframe absorb crash energy?" |
+| Exact part lookup | Sparse (BM25) | "Find specs for M8-bolt-2025" |
+| Numeric spec | Structured DB (SQL) | "What is the torque for bolt A17 at node 4?" |
+| Mixed intent | Hybrid (both) | "What bolts does the firewall assembly use and what are their torque values?" |
 
 ---
 
-### Module 3 — `Appointment`
+## 3. Full Multimodal RAG
 
-**Rôle :** Le cœur du métier. Gérer le cycle de vie complet d'un rendez-vous (de la demande à la réalisation) et les créneaux de disponibilité des médecins. C'est ici que se trouvent les règles métier les plus complexes : anti-collision de créneaux, règles d'annulation, transitions d'état.
+**Full Multimodal RAG** extends the pipeline to handle non-text modalities natively — images, diagrams, blueprints — as first-class retrieval targets.
 
-#### Racine d'Agrégat : `RendezVous`
+### Why text-only RAG fails for automotive
 
-| Attribut | Type | Pourquoi il existe |
-|---|---|---|
-| `id` | UUID | Identifiant unique |
-| `patientId` | UUID | Référence vers `Identity` |
-| `médecinId` | UUID | Référence vers `Identity` |
-| `créneauId` | UUID | Référence vers `CréneauDisponible`  |
-| `motif` | String | Raison de la consultation |
-| `statut` | Enum : `DEMANDÉ, CONFIRMÉ, ANNULÉ, TERMINÉ` | Cycle de vie |
-| `résumé` | RésuméRdv | Snapshot immuable capturé à la confirmation |
-| `createdAt` | DateTime | Traçabilité |
-| `confirméAt` | DateTime (nullable) | Horodatage de confirmation |
-| `annuléAt` | DateTime (nullable) | Horodatage d'annulation |
-| `raisonAnnulation` | String (nullable) | Traçabilité et statistiques |
+- Assembly blueprints are 2D spatial diagrams. Their meaning cannot be captured as text.
+- A mechanic uploading a photo of a cracked frame needs to match that image against the structural manual — not a text description of the frame.
+- Tables in PDFs, when OCR'd naively, lose spatial relationships between cells and headers.
 
+### Architecture: Caption-Augmented vs. Native Multimodal
 
-#### Entité : `CréneauDisponible`
-
-| Attribut | Type | Pourquoi il existe |
-|---|---|---|
-| `id` | UUID | Identifiant unique |
-| `médecinId` | UUID | Lien vers le médecin propriétaire |
-| `plage` | PlageHoraire | Objet Valeur : début + fin |
-| `statut` | Enum : `LIBRE, RÉSERVÉ, BLOQUÉ` | Gestion de la disponibilité |
-
-
-#### Objet Valeur : `RésuméRdv`
-
-| Attribut | Type |
-|---|---|
-| `nomMédecin` | String |
-| `spécialité` | String |
-| `dateHeure` | LocalDateTime |
-| `adresseCabinet` | String |
-
-#### Objet Valeur : `PlageHoraire`
-
-| Attribut | Type |
-|---|---|
-| `début` | LocalDateTime |
-| `fin` | LocalDateTime |
-
-
-
-#### Diagramme de Classes — Appointment
+#### Approach A — Caption-Augmented (simpler, weaker)
 
 ```mermaid
-classDiagram
-    class StatutRendezVous {
-        <<enumeration>>
-        DEMANDE
-        CONFIRME
-        ANNULE
-        TERMINE
-    }
+flowchart LR
+    IMG[Blueprint Image] --> VLM[VLM Captioner\ne.g. LLaVA]
+    VLM -->|Text caption| EMB[Text Embedder]
+    EMB --> VDB[(Vector DB)]
 
-    class StatutCreneau {
-        <<enumeration>>
-        LIBRE
-        RESERVE
-        BLOQUE
-    }
-
-    class RendezVous {
-        <<Racine d Agregat>>
-        +UUID id
-        +UUID patientId
-        +UUID medecinId
-        +UUID creneauId
-        +String motif
-        +StatutRendezVous statut
-        +RésuméRdv resume
-        +DateTime createdAt
-        +DateTime confirmeAt
-        +DateTime annuleAt
-        +String raisonAnnulation
-        +confirmer() void
-        +annuler(raison) void
-    }
-
-    class CreneauDisponible {
-        <<Entite>>
-        +UUID id
-        +UUID medecinId
-        +PlageHoraire plage
-        +StatutCreneau statut
-        +reserver() void
-        +liberer() void
-        +bloquer() void
-    }
-
-    class ResumeRdv {
-        <<Objet Valeur>>
-        +String nomMedecin
-        +String specialite
-        +LocalDateTime dateHeure
-        +String adresseCabinet
-    }
-
-    class PlageHoraire {
-        <<Objet Valeur>>
-        +LocalDateTime debut
-        +LocalDateTime fin
-        +estValide() Boolean
-        +chevauche(autre) Boolean
-    }
-
-    RendezVous "1" *-- "1" ResumeRdv : archive
-    RendezVous --> CreneauDisponible : reserve
-    CreneauDisponible *-- PlageHoraire : definit
-    RendezVous .. StatutRendezVous 
-    CreneauDisponible .. StatutCreneau 
+    Q([Query: photo of part]) --> VLM2[VLM: describe photo]
+    VLM2 --> EMB2[Text Embedder]
+    EMB2 -->|similarity search| VDB
+    VDB --> LLM[LLM Answer]
 ```
 
----
+**Weakness:** The caption is a lossy compression of the image. If the caption misses a dimension label, that data is gone forever.
 
-### Module 4 — `Health Record`
-
-**Rôle :** Le coffre-fort médical. Stocker de façon sécurisée les documents échangés entre patient et médecin. Ce module est régi par des contraintes de confidentialité (RGPD, secret médical) — c'est pourquoi il est rigoureusement isolé de tous les autres.
-
-#### Racine d'Agrégat : `DossierMédical`
-
-| Attribut | Type | Pourquoi il existe |
-|---|---|---|
-| `id` | UUID | Identifiant unique |
-| `patientId` | UUID | Propriétaire du dossier (référence vers `Identity`) |
-| `documents` | List\<Document\> | Collection de tous les fichiers du patient |
-
-#### Entité : `Document` *(appartient à `DossierMédical`)*
-
-| Attribut | Type | Pourquoi il existe |
-|---|---|---|
-| `id` | UUID | Identifiant unique |
-| `dossierMédicalId` | UUID | Lien vers le dossier parent |
-| `type` | Enum : `ORDONNANCE, COMPTE_RENDU, ANALYSE, AUTRE` | Catégorisation |
-| `téléversePar` | UUID | ID du médecin ou patient auteur |
-| `urlStockage` | String | Chemin sécurisé vers le fichier (S3, Azure Blob…) |
-| `métadonnées` | MétadonnéesFichier | Objet Valeur : informations techniques du fichier |
-| `statut` | Enum : `EN_ATTENTE, DISPONIBLE, ARCHIVÉ` | Cycle de vie |
-| `createdAt` | DateTime | Traçabilité et tri chronologique |
-
-#### Objet Valeur : `MétadonnéesFichier`
-
-| Attribut | Type |
-|---|---|
-| `nomOriginal` | String |
-| `tailleMo` | Decimal |
-| `formatMime` | String |
-| `checksum` | String  |
-
-
-
-#### Diagramme de Classes — Health Record
+#### Approach B — Native Multimodal Embeddings (stronger)
 
 ```mermaid
-classDiagram
-    class TypeDocument {
-        <<enumeration>>
-        ORDONNANCE
-        COMPTE_RENDU
-        ANALYSE
-        AUTRE
-    }
+flowchart LR
+    IMG[Blueprint Image] --> MENC[Multimodal Encoder\nCLIP / ColPali / BLIP-2]
+    TXT[Text Chunk] --> MENC
+    MENC -->|Shared embedding space| VDB[(Vector DB)]
 
-    class StatutDocument {
-        <<enumeration>>
-        EN_ATTENTE
-        DISPONIBLE
-        ARCHIVE
-    }
+    Q([Photo Query]) --> MENC2[Same Encoder]
+    MENC2 -->|Cross-modal similarity| VDB
+    VDB --> CTX[Retrieved: text + images]
+    CTX --> VLM[VLM Generator\nGPT-4o / Claude]
+    VLM --> ANS([Answer with image grounding])
+```
 
-    class DossierMedical {
-        <<Racine d Agregat>>
-        +UUID id
-        +UUID patientId
-        +List~Document~ documents
-        +ajouterDocument(doc) void
-        +archiverDocument(docId) void
-        +getHistorique() List~Document~
-    }
+**Strength:** A photo query directly retrieves diagrams in the same embedding space. No caption intermediary.
 
-    class Document {
-        <<Entite>>
-        +UUID id
-        +UUID dossierMedicalId
-        +TypeDocument type
-        +UUID televersePar
-        +String urlStockage
-        +MétadonnéesFichier metadonnees
-        +StatutDocument statut
-        +DateTime creeAt
-        +modifierStatut(nouveau) void
-    }
+### Key Models for Native Multimodal Embedding
 
-    class MetadonneesFichier {
-        <<Objet Valeur>>
-        +String nomOriginal
-        +Decimal tailleMo
-        +String formatMime
-        +String checksum
-    }
+| Model | Strength | Best For |
+|-------|----------|---------|
+| **ColPali** | Late interaction on page images | PDF-native retrieval without OCR |
+| **CLIP / SigLIP** | Image-text alignment | Cross-modal search |
+| **BLIP-2** | Image captioning + VQA | Visual QA on diagrams |
+| **GPT-4o / Claude** | Generation from mixed context | Final answer synthesis |
 
-    DossierMedical "1" *-- "0..*" Document : contient
-    Document *-- MetadonneesFichier : decrit par
-    Document ..> TypeDocument : utilise
-    Document ..> StatutDocument : utilise
+---
+
+## 4. Hybrid Multimodal RAG
+
+**Hybrid Multimodal RAG** is the synthesis of all the above: it combines dense + sparse retrieval with multimodal embeddings, structured data stores for exact numerics, and a routing layer that directs each query to the correct retrieval path.
+
+This is the architecture that makes sense for high-stakes engineering domains.
+
+### Why the combination is necessary
+
+No single retrieval strategy handles all automotive query types:
+
+```mermaid
+quadrantChart
+    title Query Type vs Retrieval Strategy
+    x-axis Exact Token Match --> Semantic Understanding
+    y-axis Text Only --> Visual / Multimodal
+    quadrant-1 Native VLM Embedding
+    quadrant-2 Text Semantic Search
+    quadrant-3 BM25 / SQL Exact Match
+    quadrant-4 Multimodal + BM25 Hybrid
+    Part ID lookup: [0.05, 0.15]
+    Torque spec table: [0.1, 0.2]
+    Concept question: [0.85, 0.2]
+    Blueprint cross-reference: [0.5, 0.85]
+    Photo-to-manual match: [0.2, 0.9]
+    Mixed spec + visual: [0.6, 0.7]
+```
+
+### Full Hybrid Multimodal RAG Architecture
+
+```mermaid
+flowchart TB
+    subgraph INPUT
+        UQ([User Query\nText or Image])
+    end
+
+    UQ --> QR[Query Router\nClassifier]
+
+    QR -->|Numeric / part ID| SDB[(Structured DB\nPostgreSQL / DuckDB)]
+    QR -->|Semantic concept| VSS[Dense Vector Search\nQdrant]
+    QR -->|Exact keyword| BM25[BM25 Sparse Index\nElasticsearch]
+    QR -->|Visual / blueprint| VLM_R[VLM Embedding Search\nColPali / CLIP]
+
+    SDB --> FUSE[Result Fusion\nRRF + Source Map]
+    VSS --> FUSE
+    BM25 --> FUSE
+    VLM_R --> FUSE
+
+    FUSE --> CTX[Context Builder\nwith Provenance Tags]
+    CTX --> GEN[Generator LLM\nClaude / GPT-4o]
+    GEN --> CIT[Citation Enforcer\nGuardrail Layer]
+    CIT --> ANS([Answer\n+ Source + Page + Revision])
+
+    subgraph INGESTION
+        direction TB
+        PDF[PDFs] --> DOCLING[Docling Parser\nlayout-aware]
+        XML[AUTOSAR / DITA / KBL] --> XPARSER[lxml Parser\ntyped extraction]
+        IMG[Blueprints / Photos] --> VLM_E[VLM Encoder\nCOLPali]
+
+        DOCLING --> TABLES[Tables → SQL rows]
+        DOCLING --> CHUNKS[Text Chunks → Vector DB]
+        DOCLING --> IMAGES[Images → VLM Index]
+        XPARSER --> TABLES
+        VLM_E --> IMAGES
+    end
 ```
 
 ---
 
-### Module 5 — `Notification`
+## 5. Recommended Architecture for This Project
 
-**Rôle :** Ce module ne contient aucune entité métier au sens DDD — il est **purement réactif**. Il s'abonne aux événements domaine émis par les autres modules et les convertit en communications (email, SMS, push).
+### System Design Principles
 
-#### Entité : `JournalNotification` *(piste d'audit)*
+Given the automotive safety context (ISO 26262, IATF 16949), three principles are non-negotiable:
 
-| Attribut | Type | Pourquoi il existe |
-|---|---|---|
-| `id` | UUID | Identifiant unique |
-| `destinataireId` | UUID | Référence vers l'utilisateur cible |
-| `canal` | Enum : `EMAIL, SMS, PUSH` | Canal de communication choisi |
-| `type` | Enum : `RDV_CONFIRMÉ, RDV_ANNULÉ, RAPPEL_RDV, DOCUMENT_DISPONIBLE, COMPTE_APPROUVÉ` | Type d'événement ayant déclenché la notif |
-| `contenu` | JSON | Données de l'événement (sérialisées) |
-| `envoyéAt` | DateTime | Horodatage d'envoi |
-| `statut` | Enum : `ENVOYÉ, ÉCHEC, IGNORÉ` | Résultat de la livraison |
+1. **Numerics are never retrieved by similarity** — exact match from typed storage only
+2. **Every answer carries a verifiable source trail** — document, page, section, revision hash
+3. **The LLM is a formatter, not an oracle** — it assembles retrieved facts, never infers specs
 
-#### Événements domaine consommés (depuis les autres modules)
+### Component Stack
 
-| Événement | Émis par | Action |
-|---|---|---|
-| `RdvConfirmé` | Appointment | Notifier le patient (confirmation) + le médecin (agenda mis à jour) |
-| `RdvAnnulé` | Appointment | Notifier le patient et le médecin |
-| `RappelRdvProche` | Appointment (tâche planifiée) | Envoyer un rappel 24h avant au patient |
-| `OrdonnanceDéposée` | Health Record | Notifier le patient qu'un document est disponible |
-| `CompteApprouvé` | Identity & Access | Notifier le médecin de l'activation de son compte |
-| `AvisModéré` | Administration | Notifier le patient concerné |
+```mermaid
+flowchart LR
+    subgraph Ingestion Stack
+        A[Docling] -->|tables, images, text| B[PostgreSQL\nTyped Specs]
+        A --> C[Qdrant\nVector DB]
+        A --> D[Elasticsearch\nBM25 Index]
+        E[lxml\nXML Parser] --> B
+        F[ColPali] --> C
+    end
+
+    subgraph Retrieval Stack
+        G[Query Router\nfine-tuned classifier] --> B
+        G --> C
+        G --> D
+        B --> H[RRF Fusion]
+        C --> H
+        D --> H
+    end
+
+    subgraph Generation Stack
+        H --> I[Context Builder\n+ provenance]
+        I --> J[Claude / GPT-4o\nwith system prompt guardrails]
+        J --> K[Citation Validator\npost-processing]
+        K --> L([Response\n+ source map])
+    end
+```
+
+### Technology Choices Explained
+
+| Layer | Tool | Why |
+|-------|------|-----|
+| PDF parsing | **Docling** | Preserves table structure as DataFrames, handles multi-column layouts, outputs image bounding boxes |
+| XML parsing | **lxml** | Full XPath support, schema validation, parent-child traversal for AUTOSAR/DITA |
+| Vector DB | **Qdrant** | Native sparse+dense hybrid search in one system, payload filtering for metadata |
+| Sparse index | **Elasticsearch BM25** | Industry standard for exact token retrieval, integrates with Qdrant via federation |
+| Structured DB | **PostgreSQL** | Typed columns for torque specs, part IDs, tolerances; ACID compliance for safety traceability |
+| Multimodal embed | **ColPali** | Embeds full PDF pages as images — no OCR pipeline needed, preserves spatial layout |
+| LLM Generator | **Claude 3.5 Sonnet** | Long context window, strong instruction following for citation constraints |
+| Orchestration | **LangGraph** | Stateful agent graph, supports conditional routing between retrieval paths |
+
+### Query Router Logic
+
+```mermaid
+flowchart TD
+    Q([Incoming Query]) --> C1{Contains image?}
+    C1 -->|Yes| VLM_PATH[VLM Embedding Path]
+    C1 -->|No| C2{Contains part ID\nor exact number?}
+    C2 -->|Yes| C3{Is it a lookup\nor a spec?}
+    C3 -->|Spec / numeric| SQL_PATH[Structured DB Path]
+    C3 -->|Part reference| HYBRID_PATH[BM25 + Vector Hybrid]
+    C2 -->|No| C4{Conceptual\nor procedural?}
+    C4 -->|Conceptual| VEC_PATH[Dense Vector Only]
+    C4 -->|Procedural| HYBRID_PATH
+```
+
+### Citation & Guardrail Pattern
+
+Every chunk in the vector DB and every row in the structured DB must carry a provenance payload:
+
+```json
+{
+  "doc_id": "chassis-assembly-v4.2",
+  "revision_hash": "sha256:a3f9c...",
+  "page": 47,
+  "section": "3.4.2",
+  "table_id": "T-14",
+  "row": 3,
+  "col": "Torque (Nm)",
+  "extraction_method": "docling-table",
+  "extracted_at": "2025-04-01T09:00:00Z"
+}
+```
+
+The system prompt enforces citation at generation time:
+
+```
+You are a structural engineering assistant. You MUST:
+1. Answer ONLY using the retrieved context provided below.
+2. End every numeric claim with [Source: {doc_id}, Page {page}, Section {section}].
+3. If the retrieved context does not contain the answer, respond:
+   "This specification was not found in the retrieved documents. 
+    Please consult [doc_id] directly or contact the responsible engineer."
+4. NEVER estimate, interpolate, or infer numeric values.
+```
 
 ---
 
-### Module 6 — `Administration`
+## 6. Project Roadmap
 
-**Rôle :** Gouvernance, modération et supervision de la plateforme. Ces fonctionnalités sont réservées aux administrateurs et évoluent au rythme de la politique interne, indépendamment des fonctionnalités produit.
+### Overview Timeline
 
-#### Entité : `Avis`
+```mermaid
+gantt
+    title Automotive Multimodal RAG — Build Roadmap
+    dateFormat  YYYY-MM-DD
+    section Phase 1 · Foundation
+    Environment setup & tooling          :p1a, 2025-05-01, 7d
+    PDF ingestion pipeline (Docling)     :p1b, after p1a, 10d
+    Structured DB schema + XML parser    :p1c, after p1a, 10d
+    Basic text-only RAG (smoke test)     :p1d, after p1b, 7d
 
-| Attribut | Type | Pourquoi il existe |
-|---|---|---|
-| `id` | UUID | Identifiant unique |
-| `patientId` | UUID | Auteur de l'avis |
-| `médecinId` | UUID | Médecin évalué |
-| `rendezVousId` | UUID | Lien vers le rendez-vous concerné (preuve de consultation) |
-| `note` | Integer (1–5) | Note attribuée |
-| `commentaire` | String | Texte libre |
-| `répondreParMédecin` | String (nullable) | Réponse du praticien |
-| `statut` | Enum : `VISIBLE, SIGNALÉ, SUPPRIMÉ` | Modération |
-| `createdAt` | DateTime | Traçabilité |
+    section Phase 2 · Hybrid Retrieval
+    Qdrant setup + dense embeddings      :p2a, after p1d, 7d
+    BM25 / Elasticsearch index           :p2b, after p1d, 7d
+    RRF fusion layer                     :p2c, after p2a, 5d
+    Query router (rule-based v1)         :p2d, after p2c, 5d
+    Evaluation harness (RAGAS)           :p2e, after p2d, 5d
 
-#### Entité : `RapportModération`
+    section Phase 3 · Multimodal
+    ColPali integration for blueprints   :p3a, after p2e, 10d
+    Cross-modal retrieval (photo→manual) :p3b, after p3a, 7d
+    Multi-page blueprint stitcher        :p3c, after p3a, 5d
+    VLM generator integration            :p3d, after p3b, 5d
 
-| Attribut | Type | Pourquoi il existe |
-|---|---|---|
-| `id` | UUID | Identifiant unique |
-| `signaléPar` | UUID | Référence vers l'utilisateur |
-| `cibleType` | Enum : `AVIS, PROFIL` | Type de contenu signalé |
-| `cibleId` | UUID | Identifiant de l'entité signalée |
-| `raison` | String | Motif du signalement |
-| `statut` | Enum : `EN_ATTENTE, EXAMINÉ, TRAITÉ` | Suivi admin |
+    section Phase 4 · Safety & Compliance
+    Citation enforcer + guardrails       :p4a, after p3d, 7d
+    Provenance payload standardization   :p4b, after p3d, 5d
+    Hallucination red-team testing       :p4c, after p4a, 7d
+    Audit log + revision hash tracking   :p4d, after p4b, 5d
+
+    section Phase 5 · Production
+    Query router v2 (ML classifier)      :p5a, after p4c, 7d
+    API layer + auth                     :p5b, after p4d, 7d
+    Engineer-facing UI                   :p5c, after p5b, 10d
+    Load testing + SLA validation        :p5d, after p5c, 5d
+    Pilot deployment (1 factory line)    :p5e, after p5d, 5d
+```
+
+### Phase Breakdown
+
+#### Phase 1 — Foundation (Weeks 1–3)
+
+**Goal:** Reliable ingestion of PDFs and XML without data loss.
+
+```mermaid
+flowchart LR
+    A[Raw PDFs\nXML files] --> B[Docling\nlayout parser]
+    B --> C[Tables → PostgreSQL]
+    B --> D[Text → Chunks]
+    B --> E[Images → saved with bbox]
+    F[AUTOSAR XML] --> G[lxml parser]
+    G --> C
+    D --> H[Basic RAG\nsmoke test]
+```
+
+Key deliverables:
+- `AutomotivePart` data class with typed spec fields
+- Table-to-SQL pipeline preserving column headers
+- Chunk metadata schema with page + section provenance
+- First end-to-end query returning a torque value with source citation
 
 ---
 
+#### Phase 2 — Hybrid Retrieval (Weeks 4–6)
 
+**Goal:** Part ID lookup precision + semantic coverage working together.
+
+```mermaid
+flowchart LR
+    A[Text Chunks] --> B[Dense Embedder\nBGE-M3]
+    A --> C[BM25 Indexer]
+    B --> D[(Qdrant)]
+    C --> E[(Elasticsearch)]
+    F([Query]) --> G[RRF Fusion]
+    D --> G
+    E --> G
+    G --> H[Top-K Results\nwith provenance]
+```
+
+Key deliverables:
+- Qdrant collection with payload metadata
+- BM25 index with field boosting on part IDs
+- RRF merger returning unified ranked list
+- RAGAS evaluation baseline (context precision, recall, answer faithfulness)
+
+---
+
+#### Phase 3 — Multimodal (Weeks 7–9)
+
+**Goal:** Blueprint retrieval from image queries; visual context in answers.
+
+```mermaid
+flowchart TB
+    A[Blueprint\nPDF Pages] --> B[ColPali\nPage Encoder]
+    B --> C[(Qdrant\nMultimodal Index)]
+
+    D([Engineer uploads\nphoto of part]) --> E[ColPali\nQuery Encoder]
+    E -->|similarity search| C
+    C --> F[Matching blueprint pages]
+    F --> G[VLM Generator\nClaude with vision]
+    G --> H([Answer with\nvisual grounding])
+```
+
+Key deliverables:
+- ColPali-indexed blueprint library
+- Multi-page stitcher for fold-out diagrams
+- Cross-modal query path (image input → text + image output)
+- VLM prompt template with citation enforcement for visual sources
+
+---
+
+#### Phase 4 — Safety & Compliance (Weeks 10–11)
+
+**Goal:** Zero-hallucination guarantee on numeric specs; audit-ready output.
+
+```mermaid
+flowchart LR
+    A[LLM Response] --> B[Citation Parser\nregex + JSON]
+    B --> C{All numerics\ncited?}
+    C -->|No| D[Block response\nReturn clarification]
+    C -->|Yes| E[Provenance Verifier\ncross-check DB]
+    E -->|Mismatch| D
+    E -->|Match| F[Audit Log\nappend entry]
+    F --> G([Validated Response\n+ source map])
+```
+
+Key deliverables:
+- Citation enforcer post-processing layer
+- Revision hash tracking for every source document
+- Red-team test suite: numeric swap attacks, hallucination probes
+- Audit log schema compatible with ISO 26262 traceability requirements
+
+---
+
+#### Phase 5 — Production (Weeks 12–16)
+
+**Goal:** Factory-floor deployment with engineer-facing UI and SLA compliance.
+
+```mermaid
+flowchart TB
+    subgraph User Facing
+        A[Web UI\nReact] --> B[REST API\nFastAPI]
+        C[Mobile App\nfactory floor] --> B
+    end
+
+    subgraph Backend
+        B --> D[Query Router v2\nfine-tuned classifier]
+        D --> E[Retrieval Orchestrator\nLangGraph]
+        E --> F[All retrieval paths]
+        F --> G[Generator + Guardrails]
+        G --> H[Response Cache\nRedis]
+    end
+
+    subgraph Ops
+        I[Monitoring\nLangSmith] --> E
+        J[Doc Ingestion\nCI trigger on update] --> F
+        K[Audit DB\nPostgreSQL] --> G
+    end
+```
+
+Key deliverables:
+- FastAPI service with auth and rate limiting
+- LangGraph-orchestrated agent with stateful routing
+- LangSmith tracing for every query (compliance requirement)
+- Pilot on one production line with 20 engineers
+
+---
+
+### Success Metrics by Phase
+
+| Phase | Metric | Target |
+|-------|--------|--------|
+| 1 | Table extraction fidelity | > 99% rows correctly parsed |
+| 2 | Part ID retrieval precision@5 | > 0.95 |
+| 2 | Semantic recall@10 | > 0.85 |
+| 3 | Blueprint retrieval MRR | > 0.80 |
+| 4 | Numeric hallucination rate | 0% on test suite |
+| 4 | Citation completeness | 100% of numeric claims cited |
+| 5 | P95 query latency | < 3 seconds |
+| 5 | Engineer satisfaction (pilot) | > 4.2 / 5.0 |
+
+---
+
+## Appendix: Key Risks & Mitigations
+
+| Risk | Impact | Mitigation |
+|------|--------|-----------|
+| Table split across PDF pages | Missing torque rows | Docling continuation detection + table ID stitching |
+| VLM embeds semantics not magnitudes | Wrong numeric retrieval | Separate structured DB; numerics never embedded |
+| Outdated document version in index | Wrong spec served | Revision hash in provenance; ingestion CI on document update |
+| Multi-column PDF layout shredded | Context loss | Docling `do_table_structure=True` + layout-aware chunking |
+| Cross-modal query hits wrong part family | Wrong blueprint returned | Re-ranker with part family filter as Qdrant payload condition |
+| LLM infers beyond retrieved context | Hallucination | System prompt hard constraints + post-generation citation check |
+
+---
+
+*Document version: 1.0 — April 2025*
+*Architecture: Hybrid Multimodal RAG for Automotive Structural Engineering*
